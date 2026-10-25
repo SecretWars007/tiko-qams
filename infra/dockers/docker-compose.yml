@@ -10,7 +10,6 @@ services:
       - POSTGRES_DB=qams
     volumes:
       - postgres_data:/var/lib/postgresql/data,
-      - ../../backups:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -19,12 +18,30 @@ services:
       start_period: 10s
     networks:
       - tiko-qams_network
+
+  backup:
+    image: postgres:14-alpine
+    container_name: tiko-qams-backup
+    volumes:
+      - ../../backups:/backups
+      - ../scripts/backup.sh:/backup.sh
+    entrypoint: sh -c "chmod +x /backup.sh; while true; do /backup.sh; sleep 21600; done" #6h
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=qams
+      - PGHOST=postgres
+    networks:
+      - tiko-qams_network
+    restart: unless-stopped
   
   redis:
     image: redis:7-alpine
     container_name: tiko-qams-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -33,6 +50,7 @@ services:
       start_period: 10s
     networks:
       - tiko-qams_network
+    restart: unless-stopped
   
   mailhog:
     image: mailhog/mailhog:v1.0.1
@@ -42,47 +60,51 @@ services:
       - "8025:8025"
     networks:
       - tiko-qams_network
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:8025 || exit 1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped    
     
   seq:
     image: datalust/seq:2023.4
     container_name: tiko-qams-seq
     ports:
-      - "5341:80"
+      - "5341:5341"
+      - "5342:80"
     environment:
       - ACCEPT_EULA=Y
     volumes:
       - seq_data:/data
     networks:
       - tiko-qams_network
+    restart: unless-stopped
     
   backend1:
     image: traefik/whoami:v1.10
     container_name: tiko-qams-backend1
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`qams.local`)"
-      - "traefik.http.services.whoami.loadbalancer.server.port=80"
     networks:
       - tiko-qams_network
+    restart: unless-stopped
   
   backend2:
     image: traefik/whoami:v1.10
     container_name: tiko-qams-backend2
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whoami.rule=Host(`qams.local`)"
-      - "traefik.http.services.whoami.loadbalancer.server.port=80"
     networks:
       - tiko-qams_network
+    restart: unless-stopped
   
   frontend:
     image: busybox:1.36
     container_name: tiko-qams-frontend
     volumes:
       - frontend_dist:/dist
-    command: sh -c "echo '<h1>QAMS FRONTEND OK</h1>' > /dist/index.html"
+    command: sh -c "echo '<h1>QAMS FRONTEND OK</h1>' > /dist/index.html && httpd -f -p 80 -h /dist"
     networks:
       - tiko-qams_network
+    restart: unless-stopped
   
   nginx:
     image: nginx:1.25-alpine
@@ -101,10 +123,13 @@ services:
       postgres: { condition: service_healthy }
     networks:
       - tiko-qams_network
+    restart: unless-stopped
+
 volumes:
   postgres_data: {}
   seq_data: {}
   frontend_dist: {}
+  redis_data: {}
 networks:
   tiko-qams_network:
     name: tiko-qams_network
