@@ -17,6 +17,7 @@
 \definecolor{colorvolume}{RGB}{120, 144, 156}
 \definecolor{colorbgnet}{RGB}{245, 247, 250}
 \definecolor{colorclient}{RGB}{69, 90, 100}
+\definecolor{colorenv}{RGB}{109, 76, 65}
 
 \begin{document}
 \begin{tikzpicture}[
@@ -84,6 +85,14 @@
         fill=colormail!10,
         line width=1pt
     },
+    envnode/.style={
+        card,
+        draw=colorenv,
+        fill=colorenv!10,
+        dashed,
+        minimum width=3.2cm,
+        line width=1pt
+    },
     volumenode/.style={
         cylinder,
         shape border rotate=90,
@@ -112,6 +121,12 @@
         dotted,
         line width=1pt,
         draw=colorvolume!90
+    },
+    envline/.style={
+        ->,
+        dashed,
+        line width=0.8pt,
+        draw=colorenv!80
     }
 ]
 
@@ -120,13 +135,23 @@
     % ==========================================
     \node[clientnode] (user) at (0, 7.5) {
         \textbf{Usuario / Navegador}\\
-        \footnotesize HTTPS :8443 \ / \ HTTP :8080
+        \footnotesize HTTPS \$\{NGINX\_HTTPS\_PORT:-8443\}\\
+        \footnotesize HTTP \$\{NGINX\_HTTP\_PORT:-8080\}
     };
 
     \node[clientnode] (admin) at (0, 0.5) {
         \textbf{Desarrollador / Admin}\\
-        \footnotesize Seq UI :5342 \ / \ Seq Ingest :5341\\
-        \footnotesize MailHog :8025 \ / \ PostgreSQL :5432
+        \footnotesize Seq UI :\$\{SEQ\_UI\_PORT:-5342\}\\
+        \footnotesize MailHog :\$\{MAILHOG\_UI\_PORT:-8025\}\\
+        \footnotesize PostgreSQL :\$\{POSTGRES\_PORT:-5432\}
+    };
+
+    % Nodo de Configuración de Variables (.env)
+    \node[envnode] (envfile) at (0, 4.0) {
+        \textbf{Configuración: .env}\\
+        \tiny Inyección de puertos, usuarios,\\
+        \tiny credenciales y fallbacks\\
+        \tiny (Tag: epica-1-v1.0)
     };
 
     % ==========================================
@@ -136,7 +161,7 @@
         \textbf{tiko-qams-nginx}\\
         \footnotesize Nginx 1.25 Alpine\\
         \scriptsize SSL / Cache / Balanceador\\
-        \scriptsize Listen: 80, 443 $\to$ Host: 8080, 8443
+        \scriptsize Listen: 80, 443 $\to$ Host: \$\{PORTS\}
     };
 
     % Bind mounts de Nginx
@@ -180,8 +205,9 @@
     % ==========================================
     \node[dbnode] (postgres) at (17.5, 8.0) {
         \textbf{tiko-qams-postgres}\\
-        \footnotesize PostgreSQL 14 Alpine :5432\\
-        \scriptsize Healthcheck: pg\_isready
+        \footnotesize PostgreSQL 14 Alpine\\
+        \scriptsize Port: \$\{POSTGRES\_PORT:-5432\}\\
+        \scriptsize DB: \$\{POSTGRES\_DB\}
     };
 
     \node[volumenode] (vol_postgres) at (17.5, 10.1) {
@@ -192,7 +218,7 @@
     \node[backupnode] (backup) at (22.2, 8.0) {
         \textbf{tiko-qams-backup}\\
         \footnotesize Postgres 14 (Cron 6h)\\
-        \scriptsize Script: backup.sh\\
+        \scriptsize PGHOST=\$\{POSTGRES\_HOST\}\\
         \scriptsize Rotación: $>$ 7 días
     };
 
@@ -208,7 +234,8 @@
 
     \node[redisnode] (redis) at (17.5, 4.5) {
         \textbf{tiko-qams-redis}\\
-        \footnotesize Redis 7 Alpine :6379\\
+        \footnotesize Redis 7 Alpine\\
+        \scriptsize Port: \$\{REDIS\_PORT:-6379\}\\
         \scriptsize Healthcheck: redis-cli ping
     };
 
@@ -223,8 +250,8 @@
     \node[toolnode] (seq) at (5.5, 0.5) {
         \textbf{tiko-qams-seq}\\
         \footnotesize Datalust Seq 2023.4\\
-        \scriptsize API Ingesta: 5341 $\to$ :5341\\
-        \scriptsize Web UI: 5342 $\to$ :80
+        \scriptsize API Ingesta: \$\{SEQ\_PORT:-5341\}\\
+        \scriptsize Web UI: \$\{SEQ\_UI\_PORT:-5342\}
     };
 
     \node[volumenode] (vol_seq) at (5.5, -1.6) {
@@ -235,17 +262,22 @@
     \node[mailnode] (mailhog) at (11.5, 0.5) {
         \textbf{tiko-qams-mailhog}\\
         \footnotesize MailHog v1.0.1\\
-        \scriptsize SMTP :1025 \ / \ Web UI :8025\\
-        \scriptsize Healthcheck: wget spider
+        \scriptsize SMTP :\$\{MAILHOG\_SMTP\_PORT:-1025\}\\
+        \scriptsize Web UI :\$\{MAILHOG\_UI\_PORT:-8025\}
     };
 
     % ==========================================
     % CONEXIONES / FLUJOS DE DATOS
     % ==========================================
+    % Inyección de Configuración (.env)
+    \draw[envline] (envfile) to[bend left=10] (nginx);
+    \draw[envline] (envfile) to[bend right=10] (seq);
+    \draw[envline] (envfile) to[bend left=15] (postgres);
+
     % Cliente -> Nginx
-    \draw[lineflow] (user) -- node[above, font=\footnotesize] {HTTPS :8443} (nginx);
+    \draw[lineflow] (user) -- node[above, font=\footnotesize] {HTTPS} (nginx);
     \draw[lineflow, dashed, draw=orange!90] (user.south east) to[bend right=20] 
-        node[below, font=\scriptsize, text=orange!90] {HTTP :8080 (301 Redirect)} (nginx.south west);
+        node[below, font=\scriptsize, text=orange!90] {HTTP 301 Redirect} (nginx.south west);
 
     % Nginx Binds & Volumes
     \draw[volumeline] (bind_certs) -- (nginx);
@@ -302,7 +334,7 @@
             inner sep=18pt
         ] (docker_network) {};
         \node[anchor=north west, font=\sffamily\bfseries\small, text=colordark!70] 
-            at (docker_network.north west) {Red Docker: tiko-qams\_network (Driver: Bridge, restart: unless-stopped)};
+            at (docker_network.north west) {Red Docker: \$\{NETWORK\_NAME:-tiko-qams\_network\} (epica-1-v1.0)};
 
         % Agrupación Data & Backup Layer
         \node[
